@@ -1,53 +1,43 @@
 ############################################################################################
-####  SERVER
-############################################################################################
-
-# Using the `rust-musl-builder` as base image
-FROM clux/muslrust:stable AS chef
-USER root
-RUN cargo install cargo-chef
-WORKDIR /app
-
-FROM chef AS planner
-COPY ./pentaract .
-RUN cargo chef prepare --recipe-path recipe.json
-
-FROM chef AS builder 
-COPY --from=planner /app/recipe.json recipe.json
-# Build dependencies - this is the caching Docker layer!
-RUN cargo chef cook --release --target x86_64-unknown-linux-musl --recipe-path recipe.json
-# Build application
-COPY ./pentaract .
-RUN cargo build --target x86_64-unknown-linux-musl --release
-
-############################################################################################
-####  UI
+####  UI BUILD
 ############################################################################################
 
 FROM node:21-slim AS ui
 WORKDIR /app
 
-# Set CI mode for pnpm
 ENV CI=true
-
-# Install pnpm
 RUN npm install -g pnpm
 
-# Copy UI files
 COPY ./ui ./
-
-# Install and build
 RUN rm -rf node_modules pnpm-lock.yaml && pnpm install
+
 ENV VITE_API_BASE /api
 RUN pnpm run build
 
 ############################################################################################
-####  RUNNING
+####  RUST SERVER BUILD (Debian-based for better compatibility)
 ############################################################################################
 
-# Minimal runtime image
-FROM scratch AS runtime
-COPY --from=builder /app/target/x86_64-unknown-linux-musl/release/storagewave /
-COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+FROM rust:1.75-slim-bookworm AS builder
+WORKDIR /app
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y pkg-config libssl-dev && rm -rf /var/lib/apt/lists/*
+
+# Copy and build
+COPY ./pentaract ./
+RUN cargo build --release
+
+############################################################################################
+####  RUNTIME
+############################################################################################
+
+FROM debian:bookworm-slim AS runtime
+
+# Install runtime dependencies
+RUN apt-get update && apt-get install -y ca-certificates libssl3 && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /app/target/release/storagewave /usr/local/bin/
 COPY --from=ui /app/dist /ui
-ENTRYPOINT ["/storagewave"]
+
+ENTRYPOINT ["storagewave"]
