@@ -1,0 +1,41 @@
+version: "3.9"
+
+volumes:
+  storagewave-db-volume:
+    name: storagewave-db-volume
+
+networks:
+  storagewave-network:
+    name: storagewave-network
+
+services:
+  storagewave:
+    container_name: storagewave
+    image: storagewave
+    build: .
+    env_file:
+      - .env
+    ports:
+      - ${PORT}:8000
+    restart: unless-stopped
+    depends_on:
+      - db
+    networks:
+      - storagewave-network
+
+  db:
+    container_name: storagewave_db
+    image: postgres:15.0-alpine
+    environment:
+      POSTGRES_USER: ${DATABASE_USER}
+      POSTGRES_PASSWORD: ${DATABASE_PASSWORD}
+    restart: unless-stopped
+    healthcheck:
+      test: pg_isready --username=${DATABASE_USER} --dbname=${DATABASE_NAME}
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - storagewave-db-volume:/var/lib/postgresql/data
+    networks:
+      - storagewave-network
